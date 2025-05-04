@@ -1,59 +1,299 @@
+import React, { useEffect, useState } from "react";
 import {
   reactExtension,
+  Divider,
+  Image,
   Banner,
+  Heading,
+  Button,
+  InlineLayout,
   BlockStack,
-  Checkbox,
   Text,
+  SkeletonText,
+  SkeletonImage,
+  useCartLines,
+  useApplyCartLinesChange,
   useApi,
-  useApplyAttributeChange,
-  useInstructions,
-  useTranslate,
+  useMetafield,
+  Select,
 } from "@shopify/ui-extensions-react/checkout";
 
-// 1. Choose an extension target
-export default reactExtension("purchase.checkout.block.render", () => (
-  <Extension />
-));
+export default reactExtension("purchase.checkout.block.render", () => <App />);
 
-function Extension() {
-  const translate = useTranslate();
-  const { extension } = useApi();
-  const instructions = useInstructions();
-  const applyAttributeChange = useApplyAttributeChange();
+function App() {
+  const { query, i18n } = useApi();
+  const applyCartLinesChange = useApplyCartLinesChange();
+  const [products, setProducts] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [adding, setAdding] = useState({});
+  const [showError, setShowError] = useState(false);
+  const [selectedVariants, setSelectedVariants] = useState({});
+  const [showVariantSelectors, setShowVariantSelectors] = useState({});
+  const lines = useCartLines();
 
+  const metafield = useMetafield({
+    namespace: "custom",
+    key: "recommendation",
+  });
 
-  // 2. Check instructions for feature availability, see https://shopify.dev/docs/api/checkout-ui-extensions/apis/cart-instructions for details
-  if (!instructions.attributes.canUpdateAttributes) {
-    // For checkouts such as draft order invoices, cart attributes may not be allowed
-    // Consider rendering a fallback UI or nothing at all, if the feature is unavailable
+  console.log('metafield',metafield)
+
+  useEffect(() => {
+    async function fetchProducts() {
+      try {
+        if (metafield?.value) {
+          const collectionHandle = metafield.value.trim();
+          const { data } = await query(
+            `query ($handle: String!, $first: Int!) {
+              collection(handle: $handle) {
+                products(first: $first) {
+                  nodes {
+                    id
+                    title
+                    images(first: 1) {
+                      nodes {
+                        url
+                      }
+                    }
+                    variants(first: 10) {
+                      nodes {
+                        id
+                        title
+                        price {
+                          amount
+                        }
+                        availableForSale
+                      }
+                    }
+                  }
+                }
+              }
+            }`,
+            {
+              variables: {
+                handle: collectionHandle,
+                first: 5,
+              },
+            }
+          );
+
+          if (data?.collection?.products?.nodes) {
+            setProducts(data.collection.products.nodes);
+            const initialSelected = {};
+            data.collection.products.nodes.forEach((product) => {
+              const availableVariant = product.variants.nodes.find(v => v.availableForSale);
+              if (availableVariant) {
+                initialSelected[product.id] = availableVariant.id;
+              }
+            });
+            setSelectedVariants(initialSelected);
+            return;
+          }
+        }
+
+        // fallback fetch
+        const { data } = await query(
+          `query ($first: Int!) {
+            products(first: $first) {
+              nodes {
+                id
+                title
+                images(first: 1) {
+                  nodes {
+                    url
+                  }
+                }
+                variants(first: 10) {
+                  nodes {
+                    id
+                    title
+                    price {
+                      amount
+                    }
+                    availableForSale
+                  }
+                }
+              }
+            }
+          }`,
+          { variables: { first: 5 } }
+        );
+
+        setProducts(data?.products?.nodes || []);
+        const initialSelected = {};
+        data?.products?.nodes.forEach((product) => {
+          const availableVariant = product.variants.nodes.find(v => v.availableForSale);
+          if (availableVariant) {
+            initialSelected[product.id] = availableVariant.id;
+          }
+        });
+        setSelectedVariants(initialSelected);
+      } catch (error) {
+        console.error("Error fetching products:", error);
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    fetchProducts();
+  }, [query, metafield]);
+
+  async function handleAddToCart(productId) {
+    const variantId = selectedVariants[productId];
+    if (!variantId) return;
+
+    setAdding((prev) => ({ ...prev, [productId]: true }));
+    const result = await applyCartLinesChange({
+      type: "addCartLine",
+      merchandiseId: variantId,
+      quantity: 1,
+    });
+    setAdding((prev) => ({ ...prev, [productId]: false }));
+    if (result.type === "error") {
+      setShowError(true);
+      console.error(result.message);
+    }
+  }
+
+  function handleVariantChange(productId, variantId) {
+    setSelectedVariants((prev) => ({
+      ...prev,
+      [productId]: variantId,
+    }));
+  }
+
+  function toggleVariantSelector(productId) {
+    setShowVariantSelectors((prev) => ({
+      ...prev,
+      [productId]: !prev[productId],
+    }));
+  }
+
+  if (loading) {
     return (
-      <Banner title="SNS-Reco" status="warning">
-        {translate("attributeChangesAreNotSupported")}
-      </Banner>
+      <BlockStack spacing="loose">
+        <Divider />
+        <Heading level={2}>You might also like</Heading>
+        <BlockStack spacing="loose">
+          {[...Array(3)].map((_, index) => (
+            <InlineLayout key={index} spacing="base" columns={[64, "fill", "auto"]} blockAlignment="center">
+              <SkeletonImage aspectRatio={1} />
+              <BlockStack spacing="none">
+                <SkeletonText inlineSize="large" />
+                <SkeletonText inlineSize="small" />
+              </BlockStack>
+              <Button appearance="critical" kind="secondary" disabled>
+                Add
+              </Button>
+            </InlineLayout>
+          ))}
+        </BlockStack>
+      </BlockStack>
     );
   }
 
-  // 3. Render a UI
+  const productsOnOffer = getProductsOnOffer(lines, products, selectedVariants);
+
+  if (!productsOnOffer.length) return null;
+
   return (
-    <BlockStack border={"dotted"} padding={"tight"}>
-      <Banner title="SNS-Reco">
-        {translate("welcome", {
-          target: <Text emphasis="italic">{extension.target}</Text>,
+    <BlockStack spacing="loose">
+      <Divider />
+      <Heading level={2}>You might also like</Heading>
+      <BlockStack spacing="loose">
+        {productsOnOffer.map((product) => {
+          const availableVariants = product.variants.nodes.filter(v => v.availableForSale);
+          if (!availableVariants.length) return null;
+
+          const selectedVariantId = selectedVariants[product.id];
+          const selectedVariant = availableVariants.find(v => v.id === selectedVariantId) || availableVariants[0];
+          const hasMultipleVariants = availableVariants.length > 1;
+          const showSelector = showVariantSelectors[product.id];
+
+          return (
+            <BlockStack key={product.id} spacing="base">
+              <InlineLayout spacing="base" columns={[64, "fill", "auto"]} blockAlignment="center">
+                <Image
+                  border="base"
+                  borderWidth="base"
+                  borderRadius="loose"
+                  source={product.images.nodes[0]?.url || "https://cdn.shopify.com/s/files/1/0533/2089/files/placeholder-images-image_medium.png"}
+                  accessibilityDescription={product.title}
+                  aspectRatio={1}
+                />
+                <BlockStack spacing="none">
+                  <Text size="medium" emphasis="bold">
+                    {product.title}
+                  </Text>
+                  <Text appearance="critical">{i18n.formatCurrency(selectedVariant.price.amount)}</Text>
+                </BlockStack>
+
+                {hasMultipleVariants ? (
+                  showSelector ? (
+                    <Button
+                      kind="secondary"
+                      appearance="critical"
+                      loading={adding[product.id]}
+                      onPress={() => {
+                        handleAddToCart(product.id);
+                        toggleVariantSelector(product.id);
+                      }}
+                    >
+                      Add
+                    </Button>
+                  ) : (
+                    <Button
+                      kind="secondary"
+                      appearance="critical"
+                      onPress={() => toggleVariantSelector(product.id)}
+                    >
+                      Options
+                    </Button>
+                  )
+                ) : (
+                  <Button
+                    kind="secondary"
+                    appearance="critical"
+                    loading={adding[product.id]}
+                    onPress={() => handleAddToCart(product.id)}
+                  >
+                    Add
+                  </Button>
+                )}
+              </InlineLayout>
+
+              {hasMultipleVariants && showSelector && (
+                <Select
+                  value={selectedVariantId}
+                  onChange={(value) => handleVariantChange(product.id, value)}
+                  options={availableVariants.map((variant) => ({
+                    value: variant.id,
+                    label: variant.title === "Default Title" ? "Default" : variant.title,
+                  }))}
+                />
+              )}
+            </BlockStack>
+          );
         })}
-      </Banner>
-      <Checkbox onChange={onCheckboxChange}>
-        {translate("iWouldLikeAFreeGiftWithMyOrder")}
-      </Checkbox>
+      </BlockStack>
+
+      {showError && (
+        <Banner status="critical">
+          There was an issue adding this product. Please try again.
+        </Banner>
+      )}
     </BlockStack>
   );
+}
 
-  async function onCheckboxChange(isChecked) {
-    // 4. Call the API to modify checkout
-    const result = await applyAttributeChange({
-      key: "requestedFreeGift",
-      type: "updateAttribute",
-      value: isChecked ? "yes" : "no",
-    });
-    console.log("applyAttributeChange result", result);
-  }
+function getProductsOnOffer(lines, products, selectedVariants) {
+  const cartLineProductVariantIds = lines.map((item) => item.merchandise.id);
+  return products.filter((product) =>
+    product.variants.nodes.some((variant) => {
+      const isSelected = selectedVariants[product.id] === variant.id;
+      return variant.availableForSale &&
+        !cartLineProductVariantIds.includes(variant.id) &&
+        (product.variants.nodes.length === 1 || isSelected);
+    })
+  );
 }
