@@ -25,3 +25,8 @@ embedded = false
 [[extensions.metafields.read]]
 namespace = "custom"
 key = "recommendation"
+
+[extensions.capabilities]
+api_access = true
+network_access = true
+block_progress = false

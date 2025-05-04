@@ -15,6 +15,7 @@ import {
   useApplyCartLinesChange,
   useApi,
   useMetafield,
+  useAppMetafields,
   Select,
 } from "@shopify/ui-extensions-react/checkout";
 
@@ -36,7 +37,44 @@ function App() {
     key: "recommendation",
   });
 
-  console.log('metafield',metafield)
+  const accessToken = 'cba299c1bc61707d3c32c4029e8862c2';
+  const shopDomain = 'checkout-ui-testing-one.myshopify.com';
+  const graphQlUrl = `https://${shopDomain}/api/2023-07/graphql.json`;
+
+  const fetchPage = async () => {
+    const headers = new Headers();
+    headers.append("X-Shopify-Storefront-Access-Token", accessToken);
+    headers.append("Content-Type", "application/json");
+    const query = `query page ($handle: String) {
+      page(handle: $handle) {
+        title
+        upsellCollection:metafield(namespace:"custom", key: "recommendation") {
+          value
+        }
+      }
+    }`
+    const variables = { handle: 'global-page-cart-data-do-not-delete' }
+
+    const graphql = JSON.stringify({
+      query,
+      variables
+    })
+    const requestOptions = {
+      method: 'POST',
+      headers: headers,
+      body: graphql
+    };
+
+    const pageData = await fetch(graphQlUrl, requestOptions);
+    const pageJson = await pageData.json();
+    return pageJson;
+  }
+
+
+  (async () => {
+    const pageJson = await fetchPage();
+    console.log("Fetched Page JSON:", pageJson);
+  })();
 
   useEffect(() => {
     async function fetchProducts() {
