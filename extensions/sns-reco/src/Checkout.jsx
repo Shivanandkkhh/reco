@@ -42,48 +42,65 @@ function App() {
   const graphQlUrl = `https://${shopDomain}/api/2023-07/graphql.json`;
 
   const fetchPage = async () => {
-    const headers = new Headers();
-    headers.append("X-Shopify-Storefront-Access-Token", accessToken);
-    headers.append("Content-Type", "application/json");
-    const query = `query page ($handle: String) {
-      page(handle: $handle) {
-        title
-        upsellCollection:metafield(namespace:"custom", key: "recommendation") {
-          value
+    try {
+      const headers = new Headers();
+      headers.append("X-Shopify-Storefront-Access-Token", accessToken);
+      headers.append("Content-Type", "application/json");
+      const query = `query page ($handle: String) {
+        page(handle: $handle) {
+          title
+          upsellCollection:metafield(namespace:"custom", key: "recommendation") {
+            value
+          }
         }
-      }
-    }`
-    const variables = { handle: 'global-page-cart-data-do-not-delete' }
-
-    const graphql = JSON.stringify({
-      query,
-      variables
-    })
-    const requestOptions = {
-      method: 'POST',
-      headers: headers,
-      body: graphql
-    };
-
-    const pageData = await fetch(graphQlUrl, requestOptions);
-    const pageJson = await pageData.json();
-    return pageJson;
-  }
-
+      }`;
+      const variables = { handle: 'global-page-cart-data-do-not-delete' };
+  
+      const graphql = JSON.stringify({
+        query,
+        variables
+      });
+      const requestOptions = {
+        method: 'POST',
+        headers: headers,
+        body: graphql
+      };
+  
+      const response = await fetch(graphQlUrl, requestOptions);
+      return await response.json();
+    } catch (error) {
+      console.error("Error fetching page:", error);
+      return null;
+    }
+  };
 
   (async () => {
     const pageJson = await fetchPage();
     console.log("Fetched Page JSON:", pageJson);
   })();
 
+
   useEffect(() => {
     async function fetchProducts() {
       try {
-        if (metafield?.value) {
-          const collectionHandle = metafield.value.trim();
+        let collectionId = null;
+        
+        // First try to get collection ID from the page metafield
+        const pageJson = await fetchPage();
+        const pageCollectionId = pageJson?.data?.page?.upsellCollection?.value;
+        
+        if (pageCollectionId?.includes("gid://shopify/Collection/")) {
+          collectionId = pageCollectionId.trim();
+        }
+        // Fallback to the direct metafield if page fetch didn't work
+        else if (metafield?.value?.includes("gid://shopify/Collection/")) {
+          collectionId = metafield.value.trim();
+        }
+  
+        if (collectionId) {
           const { data } = await query(
-            `query ($handle: String!, $first: Int!) {
-              collection(handle: $handle) {
+            `query ($id: ID!, $first: Int!) {
+              collection(id: $id) {
                 products(first: $first) {
                   nodes {
                     id
@@ -109,12 +126,12 @@ function App() {
             }`,
             {
               variables: {
-                handle: collectionHandle,
+                id: collectionId,
                 first: 5,
               },
             }
           );
-
+  
           if (data?.collection?.products?.nodes) {
             setProducts(data.collection.products.nodes);
             const initialSelected = {};
@@ -128,8 +145,8 @@ function App() {
             return;
           }
         }
-
-        // fallback fetch
+  
+        // fallback to general product fetch if no collection found
         const { data } = await query(
           `query ($first: Int!) {
             products(first: $first) {
@@ -156,7 +173,7 @@ function App() {
           }`,
           { variables: { first: 5 } }
         );
-
+  
         setProducts(data?.products?.nodes || []);
         const initialSelected = {};
         data?.products?.nodes.forEach((product) => {
@@ -172,7 +189,7 @@ function App() {
         setLoading(false);
       }
     }
-
+  
     fetchProducts();
   }, [query, metafield]);
 
