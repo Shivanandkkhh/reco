@@ -39,6 +39,11 @@ function App() {
 
   const accessToken = 'cba299c1bc61707d3c32c4029e8862c2';
   const shopDomain = 'checkout-ui-testing-one.myshopify.com';
+
+  // for SNS use below
+  // const accessToken = 'd199d7b1934bb49ef55c92ffd695421d';
+  // const shopDomain = 'sports-nutrition-source-canada.myshopify.com';
+
   const graphQlUrl = `https://${shopDomain}/api/2023-07/graphql.json`;
 
   const fetchPage = async () => {
@@ -55,6 +60,9 @@ function App() {
         }
       }`;
       const variables = { handle: 'global-page-cart-data-do-not-delete' };
+
+      // handle for SNS use below
+      // global-data-for-checkout-ui-extension-do-not-delete
   
       const graphql = JSON.stringify({
         query,
